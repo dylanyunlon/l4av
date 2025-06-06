@@ -441,8 +441,6 @@ cat > deepspeed_config.json << EOF
     "scheduler": {
         "type": "WarmupCosineLR",
         "params": {
-            "warmup_min_lr": "auto",
-            "warmup_max_lr": "auto",
             "warmup_num_steps": "auto",
             "total_num_steps": "auto"
         }
