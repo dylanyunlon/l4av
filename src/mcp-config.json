@@ -1,0 +1,61 @@
+{
+  "mcpServers": {
+    "vmp-mcp-server": {
+      "command": "python",
+      "args": ["-m", "mcp_server.main"],
+      "description": "VMP (Virtual Machine Protection) MCP Server - 将汇编代码转换为VMP保护代码",
+      "tools": [
+        {
+          "name": "transform_asm_to_vmp",
+          "description": "将普通汇编代码转换为VMP保护的汇编代码",
+          "examples": [
+            {
+              "description": "转换简单的汇编函数",
+              "input": {
+                "asm_code": "push %rbp\nmov %rsp, %rbp\nmov $10, %rax\nadd $20, %rax\npop %rbp\nret",
+                "protection_level": "basic"
+              }
+            },
+            {
+              "description": "使用高级保护",
+              "input": {
+                "asm_code": "mov (%rdi), %rax\nadd $1, %rax\nmov %rax, (%rdi)\nret",
+                "protection_level": "advanced",
+                "encryption_seed": 2882400001
+              }
+            }
+          ]
+        },
+        {
+          "name": "analyze_vmp_code", 
+          "description": "分析VMP保护后的代码结构",
+          "examples": [
+            {
+              "description": "基础分析",
+              "input": {
+                "vmp_code": "; VMP Protected Assembly\nsection .vmp_data\n...",
+                "show_details": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "convert_instruction",
+          "description": "将单条汇编指令转换为VMP字节码",
+          "examples": [
+            {
+              "description": "转换ADD指令",
+              "input": {
+                "instruction": "add",
+                "operands": ["%rax", "%rbx"]
+              }
+            }
+          ]
+        }
+      ],
+      "environment": {
+        "PYTHONPATH": "./src"
+      }
+    }
+  }
+}
