@@ -11,8 +11,12 @@ CAST_OP = 0x07
 BR_OP = 0x08
 Call_OP = 0x09
 Ret_OP = 0x0A
+NOP_OP = 0x0B      # No Operation
+PUSH_OP = 0x0C     # Push to stack
+POP_OP = 0x0D      # Pop from stack
+LEA_OP = 0x0E      # Load Effective Address
 
-OP_TOTAL = 0x0A
+OP_TOTAL = 0x0E
 
 # Pointer size
 POINTER_SIZE = 8
@@ -60,17 +64,26 @@ OPCODE_NAMES = {
     CAST_OP: "CAST",
     BR_OP: "BR",
     Call_OP: "CALL",
-    Ret_OP: "RET"
+    Ret_OP: "RET",
+    NOP_OP: "NOP",
+    PUSH_OP: "PUSH",
+    POP_OP: "POP",
+    LEA_OP: "LEA"
 }
 
 BINOP_NAMES = {
     BINOP_ADD: "ADD",
+    BINOP_FADD: "FADD",
     BINOP_SUB: "SUB",
+    BINOP_FSUB: "FSUB",
     BINOP_MUL: "MUL",
+    BINOP_FMUL: "FMUL",
     BINOP_UDIV: "UDIV",
     BINOP_SDIV: "SDIV",
+    BINOP_FDIV: "FDIV",
     BINOP_UREM: "UREM",
     BINOP_SREM: "SREM",
+    BINOP_FREM: "FREM",
     BINOP_SHL: "SHL",
     BINOP_LSHR: "LSHR",
     BINOP_ASHR: "ASHR",

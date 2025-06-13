@@ -29,10 +29,10 @@ class VMPTransformer:
         try:
             # Parse assembly code
             parsed = self.parser.parse(assembly_code)
-            
+            print(parsed)
             # Convert to VMP bytecode
             bytecode, variables = self.converter.convert_assembly(assembly_code)
-            
+            print("2gannina")
             # Generate VMP protected assembly text
             vmp_text = self.converter.generate_vmp_text(assembly_code)
             
