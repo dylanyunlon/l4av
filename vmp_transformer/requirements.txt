@@ -1,0 +1,22 @@
+# VMP Transformer Requirements
+
+# Core dependencies
+dataclasses>=0.8
+typing>=3.7.4
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
+# Development
+black>=22.0.0
+flake8>=4.0.0
+mypy>=0.950
+
+# Documentation
+sphinx>=4.5.0
+sphinx-rtd-theme>=1.0.0
+
+# Optional performance
+numpy>=1.20.0  # For efficient byte operations
+numba>=0.55.0  # For JIT compilation of hot paths
