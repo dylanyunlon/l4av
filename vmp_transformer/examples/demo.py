@@ -141,10 +141,8 @@ def example_advanced_vmp():
 
         if analysis['success']:
             print("\nExecution trace:")
-            for trace_line in analysis['trace'][:10]:  # First 10 trace lines
+            for trace_line in analysis['trace']:  # First 10 trace lines
                 print(f"  {trace_line}")
-            if len(analysis['trace']) > 10:
-                print(f"  ... ({len(analysis['trace'])} total trace lines)")
         else:
             print(f"Analysis failed: {analysis['error']}")
     else:
