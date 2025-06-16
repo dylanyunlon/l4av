@@ -1,0 +1,44 @@
+=== VMP Analysis Sample Report ===
+
+Total samples analyzed: 100
+Metrics computed for: 10 samples
+
+Summary Statistics:
+
+code_expansion_rate:
+  Average: 9.25
+  Min: 2.48
+  Max: 23.88
+
+instruction_diversity:
+  Average: 0.00
+  Min: 0.00
+  Max: 0.00
+
+control_flow_complexity:
+  Average: 1.49
+  Min: -0.05
+  Max: 3.53
+
+obfuscation_strength:
+  Average: 0.25
+  Min: 0.19
+  Max: 0.35
+
+anti_debug_features:
+  Average: 1.50
+  Min: 0.00
+  Max: 3.00
+
+vm_handler_count:
+  Average: 2.00
+  Min: 2.00
+  Max: 2.00
+
+
+Top Protected Functions (by code expansion):
+1. mv88fx_snd_readl - 23.88x expansion
+2. mv88fx_snd_readl - 20.12x expansion
+3. mv88fx_snd_readl - 16.73x expansion
+4. mv88fx_snd_readl - 13.80x expansion
+5. gint1_fn_cF - 3.76x expansion
