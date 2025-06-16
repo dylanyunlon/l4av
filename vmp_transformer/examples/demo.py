@@ -195,14 +195,16 @@ def process_single_entry(entry_data, line_num):
                     'line': line_num,
                     'function': func_name,
                     'status': 'success',
-                    'bytecode_size': result['metadata']['bytecode_size'],
-                    'variables': len(result['metadata']['variables'])
+                    'original_assembly': asm_code_content,  # Save original assembly
+                    'vmp_assembly': result['vmp_assembly'],  # Save VMP protected assembly
+                    'bytecode_size': result['metadata']['bytecode_size']
                 }
             else:
                 return {
                     'line': line_num,
                     'function': func_name,
                     'status': 'failed',
+                    'original_assembly': asm_code_content,  # Save original even on failure
                     'error': result['error']
                 }
         else:
@@ -224,8 +226,7 @@ def process_single_entry(entry_data, line_num):
             'status': 'failed',
             'error': f'Unexpected error: {e}'
         }
-
-
+    
 def process_chunk(chunk_data):
     """Process a chunk of lines"""
     results = []
@@ -354,11 +355,8 @@ def evaluation_mibench():
     if success_count > 0:
         successful_results = [r for r in all_results if r['status'] == 'success']
         avg_bytecode_size = sum(r['bytecode_size'] for r in successful_results) / len(successful_results)
-        avg_variables = sum(r['variables'] for r in successful_results) / len(successful_results)
     else:
         avg_bytecode_size = 0
-        avg_variables = 0
-
     # Final summary
     print("\n" + "=" * 80)
     print("EVALUATION SUMMARY")
@@ -370,8 +368,6 @@ def evaluation_mibench():
     if success_count > 0:
         print(f"\nSuccessful transformation statistics:")
         print(f"  Average bytecode size: {avg_bytecode_size:.1f} bytes")
-        print(f"  Average variables: {avg_variables:.1f}")
-
     if errors:
         print("\nError breakdown (top 10):")
         sorted_errors = sorted(errors.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -386,7 +382,13 @@ def evaluation_mibench():
     # Sort results by line number for better organization
     all_results.sort(key=lambda x: x['line'])
 
+    # Save full transformations to a separate file for successful cases
+    transformations_file = f"mibench_transformations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    
     print(f"\nSaving results to {output_file}...")
+    print(f"Saving transformations to {transformations_file}...")
+    
+    # Save summary and metadata
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             'summary': {
@@ -395,14 +397,56 @@ def evaluation_mibench():
                 'failed': failure_count,
                 'success_rate': f"{success_count / total_count * 100:.1f}%",
                 'avg_bytecode_size': avg_bytecode_size,
-                'avg_variables': avg_variables,
                 'processing_time': f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             },
             'errors': errors,
-            'details': all_results[:1000]  # Save first 1000 detailed results to avoid huge files
+            'failed_entries': [
+                {
+                    'line': r['line'],
+                    'function': r.get('function', 'unknown'),
+                    'error': r['error'],
+                    'original_assembly': r.get('original_assembly', '')
+                }
+                for r in all_results if r['status'] == 'failed'
+            ][:100]  # Save first 100 failed entries
         }, f, indent=2)
 
-    print(f"Detailed results saved to: {output_file}")
+    # Save successful transformations with full assembly code
+    successful_transformations = [
+        {
+            'line': r['line'],
+            'function': r['function'],
+            'original_assembly': r['original_assembly'],
+            'vmp_assembly': r['vmp_assembly'],
+            'bytecode_size': r['bytecode_size']
+        }
+        for r in all_results if r['status'] == 'success'
+    ]
+    
+    # Save transformations (can be large, so consider limiting or splitting)
+    with open(transformations_file, 'w', encoding='utf-8') as f:
+        # Save all successful transformations or limit to a reasonable number
+        # Here we save all, but you might want to limit this if the file gets too large
+        json.dump({
+            'metadata': {
+                'total_transformations': len(successful_transformations),
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            },
+            'transformations': successful_transformations[:1000]  # Limit to first 1000
+        }, f, indent=2)
+    
+    # Optionally, save all transformations to a JSONL file for easier processing
+    all_transformations_file = f"mibench_all_transformations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+    print(f"Saving all transformations to {all_transformations_file}...")
+    
+    with open(all_transformations_file, 'w', encoding='utf-8') as f:
+        for trans in successful_transformations:
+            f.write(json.dumps(trans) + '\n')
+
+    print(f"\nResults saved to:")
+    print(f"  - Summary: {output_file}")
+    print(f"  - Transformations (JSON): {transformations_file}")
+    print(f"  - All transformations (JSONL): {all_transformations_file}")
     print(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 
