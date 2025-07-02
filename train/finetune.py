@@ -8,7 +8,7 @@ import torch.distributed
 import transformers
 from transformers import Trainer, AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, TaskType, PeftModel
+from peft import LoraConfig, get_peft_model, TaskType, PeftModel, prepare_model_for_kbit_training
 
 
 IGNORE_INDEX = -100
@@ -80,6 +80,8 @@ class TrainingArguments(transformers.TrainingArguments):
     # LoRA训练相关设置
     remove_unused_columns: bool = field(default=False)
     dataloader_pin_memory: bool = field(default=False)
+    gradient_checkpointing: bool = field(default=True)
+    ddp_find_unused_parameters: bool = field(default=False)
 
 
 def _tokenize_fn(
@@ -166,10 +168,53 @@ def train_tokenize_function(examples, tokenizer):
     return data_dict
 
 
+def get_custom_device_map():
+    """Create custom device map for heterogeneous GPUs"""
+    # For 34B model with 3 GPUs (H100 94GB, A6000 48GB, A6000 48GB)
+    # We need to carefully distribute layers
+    
+    # Get actual GPU memory in GB
+    gpu_memory = []
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            gpu_memory.append(props.total_memory / (1024**3))
+    
+    # For CodeLlama-34B, there are typically 48 layers
+    # We'll distribute based on available memory
+    # GPU 0 (H100): ~50% of layers
+    # GPU 1 (A6000): ~25% of layers  
+    # GPU 2 (A6000): ~25% of layers
+    
+    device_map = {
+        'model.embed_tokens': 0,
+        'model.norm': 2,
+        'lm_head': 2,
+    }
+    
+    # Distribute layers
+    total_layers = 48  # CodeLlama-34B has 48 layers
+    
+    # H100 gets more layers due to larger memory
+    for i in range(0, 24):  # First 24 layers on GPU 0 (H100)
+        device_map[f'model.layers.{i}'] = 0
+    
+    for i in range(24, 36):  # Next 12 layers on GPU 1
+        device_map[f'model.layers.{i}'] = 1
+        
+    for i in range(36, 48):  # Last 12 layers on GPU 2
+        device_map[f'model.layers.{i}'] = 2
+    
+    return device_map
+
+
 def setup_lora_model(model, model_args):
     """设置LoRA模型"""
     if not model_args.use_lora:
         return model
+    
+    # Prepare model for k-bit training if needed
+    model = prepare_model_for_kbit_training(model)
     
     # 解析target modules
     target_modules = [module.strip() for module in model_args.lora_target_modules.split(",")]
@@ -192,6 +237,27 @@ def setup_lora_model(model, model_args):
     return model
 
 
+def is_deepspeed_zero3_enabled(training_args):
+    """Check if DeepSpeed ZeRO-3 is enabled"""
+    if not training_args.deepspeed:
+        return False
+    
+    # Check if deepspeed config is a dict
+    if isinstance(training_args.deepspeed, dict):
+        zero_optimization = training_args.deepspeed.get("zero_optimization", {})
+        return zero_optimization.get("stage", 0) == 3
+    
+    # If deepspeed is a string (config file path), we need to load it
+    try:
+        import json
+        with open(training_args.deepspeed, 'r') as f:
+            ds_config = json.load(f)
+            zero_optimization = ds_config.get("zero_optimization", {})
+            return zero_optimization.get("stage", 0) == 3
+    except:
+        return False
+
+
 def train():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -201,21 +267,6 @@ def train():
     if training_args.local_rank == 0:
         print("=" * 100)
         print(training_args)
-        
-        # 打印DeepSpeed配置信息
-        if training_args.deepspeed:
-            print(f"Using DeepSpeed configuration: {training_args.deepspeed}")
-            import json
-            try:
-                with open(training_args.deepspeed, 'r') as f:
-                    deepspeed_config = json.load(f)
-                print("DeepSpeed config loaded successfully with auto values")
-                print("Key settings:")
-                print(f"  - ZeRO stage: {deepspeed_config.get('zero_optimization', {}).get('stage', 'N/A')}")
-                print(f"  - bf16: {deepspeed_config.get('bf16', {}).get('enabled', 'N/A')}")
-                print(f"  - optimizer: {deepspeed_config.get('optimizer', {}).get('type', 'N/A')}")
-            except Exception as e:
-                print(f"Note: Could not read DeepSpeed config details: {e}")
 
     # 加载tokenizer
     tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -241,12 +292,36 @@ def train():
     # 模型加载配置
     model_kwargs = {
         "torch_dtype": torch.bfloat16,
+        "trust_remote_code": True,
     }
     
-    # 当使用DeepSpeed时，不要使用device_map="auto"
-    if not training_args.deepspeed and not model_args.use_lora:
-        model_kwargs["device_map"] = "auto"
+    # Check if DeepSpeed Zero-3 is enabled
+    is_zero3 = is_deepspeed_zero3_enabled(training_args)
     
+    if training_args.local_rank == 0:
+        print(f"DeepSpeed Zero-3 enabled: {is_zero3}")
+    
+    # CRITICAL FIX: When using DeepSpeed ZeRO-3, NEVER use device_map or low_cpu_mem_usage
+    if is_zero3:
+        # For Zero-3, we must NOT use device_map or low_cpu_mem_usage
+        model_kwargs["device_map"] = None
+        model_kwargs["low_cpu_mem_usage"] = False
+        if training_args.local_rank == 0:
+            print("Zero-3 detected: Disabled device_map and low_cpu_mem_usage")
+    else:
+        # For non-Zero3 scenarios, we can use device_map
+        if torch.cuda.device_count() > 1:
+            # For multi-GPU without Zero-3, use auto device map
+            model_kwargs["device_map"] = "auto"
+            model_kwargs["low_cpu_mem_usage"] = True
+            if training_args.local_rank == 0:
+                print(f"Using auto device_map for {torch.cuda.device_count()} GPUs")
+        else:
+            # Single GPU
+            model_kwargs["device_map"] = None
+            model_kwargs["low_cpu_mem_usage"] = True
+    
+    # Flash attention configuration
     if model_args.use_flash_attention:
         model_kwargs["attn_implementation"] = "flash_attention_2"
 
@@ -260,13 +335,15 @@ def train():
     model = setup_lora_model(model, model_args)
 
     # 启用梯度检查点以节省内存
-    if hasattr(model, 'enable_input_require_grads'):
-        model.enable_input_require_grads()
-    else:
-        # 对于LoRA模型，需要手动设置
-        def make_inputs_require_grad(module, input, output):
-            output.requires_grad_(True)
-        model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+    if training_args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        if hasattr(model, 'enable_input_require_grads'):
+            model.enable_input_require_grads()
+        else:
+            # 对于LoRA模型，需要手动设置
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
     if training_args.local_rank == 0:
         print("Load model from {} over.".format(model_args.model_name_or_path))
@@ -274,6 +351,13 @@ def train():
             print("LoRA enabled with r={}, alpha={}, dropout={}".format(
                 model_args.lora_r, model_args.lora_alpha, model_args.lora_dropout
             ))
+        
+        # Print GPU memory usage
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                allocated = torch.cuda.memory_allocated(i) / (1024**3)
+                reserved = torch.cuda.memory_reserved(i) / (1024**3)
+                print(f"GPU {i}: Allocated {allocated:.2f} GB, Reserved {reserved:.2f} GB")
 
     # 加载数据集
     raw_train_datasets = load_dataset(
